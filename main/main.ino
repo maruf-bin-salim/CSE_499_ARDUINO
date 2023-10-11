@@ -1,9 +1,9 @@
-#include <ESP32Servo.h>
-#include <WiFi.h>
-#include <HTTPClient.h>
+#include <ESP32Servo.h>  // Servo Library to move a 180 deg servo precisely with ESP32_cam
+#include <WiFi.h>        // wifi library to connect to a WIFI network
+#include <HTTPClient.h>  // http client library to send http request
 
 
-
+// These are the GPIO pins used for the project
 #define SERVO_1_PIN 12
 #define SERVO_2_PIN 13
 #define IR_SENSOR_PIN 15
@@ -33,7 +33,8 @@
 
 const char* ssid = "Z60";
 const char* password = "12345678";
-const char* post_url = "https://trash-detection-frontend.netlify.app/api/hello";
+const char* post_url = "https://trash-detection-frontend.netlify.app/api/hello";          // this endpoint takes in the raw image data and returns a data url
+const char* prediction_server_url = "https://trash-detection-api1.onrender.com/predict";  // this endpoint takes in a data url and returns the prediction using AI
 
 
 Servo servo_1, servo_2;
@@ -53,7 +54,10 @@ enum State {
   MOVE_SERVO_1_BACK,
 };
 
-State currentState = IDLE;
+// state analysis:
+// when the IR sensor detects an object, capture image and send to server -> move servo 1 to a position -> move servo 2 downwards -> then upwords -> then servo 1 to idle position
+
+State currentState = IDLE;  // initial state
 int previousPosition_1 = 0;
 int previousPosition_2 = 0;
 
@@ -61,23 +65,25 @@ int previousPosition_2 = 0;
 
 
 void captureAndSendPhoto() {
-  camera_fb_t* fb = NULL;
+  camera_fb_t* fb = NULL;  // holds the frame buffer (raw image data)
 
+  digitalWrite(LED_PIN, HIGH);  // flash for better image quality
   // Capture a photo
-  fb = esp_camera_fb_get();
+  fb = esp_camera_fb_get();  // capture the image
   if (!fb) {
     Serial.println("Camera capture failed");
     return;
   }
+  digitalWrite(LED_PIN, LOW);
 
   HTTPClient http;
 
-  Serial.print("[HTTP] begin...\n");
+  Serial.println("[HTTP] begin...");
   // configure traged server and url
 
   http.begin(post_url);  //HTTP
 
-  Serial.print("[HTTP] POST...\n");
+  Serial.println("[HTTP] POST...");
   // start connection and send HTTP header
   int httpCode = http.sendRequest("POST", fb->buf, fb->len);  // we simply put the whole image in the post body.
 
@@ -89,15 +95,14 @@ void captureAndSendPhoto() {
     // file found at server
     if (httpCode == 200) {
       String payload = http.getString();
-      Serial.println(payload);
+      // Serial.println(payload);
     }
   } else {
     Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
   }
-
   http.end();
 
-  servo_1_target = 180;
+  servo_1_target = 180;  // later on will be changed by the payload to different angles
 
   // Return the frame buffer to the camera library
   esp_camera_fb_return(fb);
@@ -118,6 +123,7 @@ void setup() {
   Serial.println(ssid);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
+    // not yet connected
     Serial.print(".");
     delay(500);
   }
@@ -126,7 +132,7 @@ void setup() {
   Serial.println(WiFi.localIP());
 
   // PREPARE CAMERA
-
+  // camera config
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -160,7 +166,7 @@ void setup() {
     config.fb_count = 1;
   }
 
-  // camera init
+  // camera initialization
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
@@ -183,74 +189,93 @@ void setup() {
   // Initialize previous positions
   previousPosition_1 = 0;
   previousPosition_2 = 0;
-
-  // Send a GET request and handle the response
-  // sendGetRequest("https://akuzechie.blogspot.com/2021/09/assembly-programming-via-arduino-uno.html");
 }
 
 
 
 void loop() {
 
+  // take the infra-red sensor value
   IRSensorValue = !digitalRead(IR_SENSOR_PIN);
 
-  if (IRSensorValue == HIGH && currentState == IDLE) {
-    currentState = MOVE_SERVO_1;
+  // if the sensor detects something and is in the IDLE state
+  if (IRSensorValue == LOW && currentState == IDLE) {
+    // go to capture state
+    currentState = CAPTURE;
   }
 
+  // interval based structure - non blocking (instead of delay based)
+
   unsigned long current_timestamp = millis();
+
+  // if it has been long enough (based on interval), do a work cycle
   if (current_timestamp - previous_timestamp >= interval) {
+
     previous_timestamp = current_timestamp;
 
+    // do different action based on the state
     switch (currentState) {
 
       case CAPTURE:
-        digitalWrite(LED_PIN, HIGH);
+        Serial.println("Capturing Image");
+        captureAndSendPhoto();
+
+        // move servo 1 -> to target (target updated through the prev function)
         currentState = MOVE_SERVO_1;
+        Serial.println("Moving servo 1 to target");
+
         break;
 
       case MOVE_SERVO_1:
-        if (servoPosition_1 < 180) {
+        if (servoPosition_1 < servo_1_target) {
           servoPosition_1 += increment;
           servo_1.write(servoPosition_1);
         } else {
-          currentState = MOVE_SERVO_1_BACK;
-        }
-        break;
 
-      case MOVE_SERVO_1_BACK:
-        if (servoPosition_1 > 0) {
-          servoPosition_1 -= increment;
-          servo_1.write(servoPosition_1);
-        } else {
+          // tilt servo 2 90 degree (downward)
           currentState = MOVE_SERVO_2;
+          Serial.println("Moving servo 2 to target");
         }
         break;
 
       case MOVE_SERVO_2:
+
         if (servoPosition_2 < 90) {
           servoPosition_2 += increment;
           servo_2.write(servoPosition_2);
         } else {
+          // tilt back servo 2 - 0 degree (upword)
           currentState = MOVE_SERVO_2_BACK;
+          Serial.println("Moving servo 2 back");
         }
         break;
 
-
       case MOVE_SERVO_2_BACK:
+
         if (servoPosition_2 > 0) {
           servoPosition_2 -= increment;
           servo_2.write(servoPosition_2);
         } else {
-          currentState = IDLE;
+          // servo 1 to default position
+          currentState = MOVE_SERVO_1_BACK;
+          Serial.println("Moving servo 1 back");
         }
         break;
+
+      case MOVE_SERVO_1_BACK:
+
+        if (servoPosition_1 > 0) {
+          servoPosition_1 -= increment;
+          servo_1.write(servoPosition_1);
+        } else {
+          currentState = IDLE;
+          Serial.println("Going Idle");
+        }
+        break;
+
+
       default:
         break;
     }
   }
 }
-
-
-
-//
