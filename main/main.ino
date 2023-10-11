@@ -199,7 +199,7 @@ void loop() {
   IRSensorValue = !digitalRead(IR_SENSOR_PIN);
 
   // if the sensor detects something and is in the IDLE state
-  if (IRSensorValue == LOW && currentState == IDLE) {
+  if (IRSensorValue == HIGH && currentState == IDLE) {
     // go to capture state
     currentState = CAPTURE;
   }
