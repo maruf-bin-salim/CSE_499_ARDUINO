@@ -33,7 +33,7 @@
 
 const char* ssid = "Z60";
 const char* password = "12345678";
-const char* post_url = "https://trash-detection-frontend.netlify.app/api/hello";          // this endpoint takes in the raw image data and returns a data url
+const char* post_url = "https://trash-detection-frontend.netlify.app/api/image-bytes-to-data-url";          // this endpoint takes in the raw image data and returns a data url
 const char* prediction_server_url = "https://trash-detection-api1.onrender.com/predict";  // this endpoint takes in a data url and returns the prediction using AI
 
 
